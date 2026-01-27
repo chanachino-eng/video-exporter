@@ -4,9 +4,13 @@ const { exec } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuid } = require("uuid");
+const cors = require("cors");
 
 const app = express();
+
+// middleware
 app.use(express.json());
+app.use(cors());
 
 app.post("/export", async (req, res) => {
   const { videoUrls } = req.body;
@@ -23,16 +27,21 @@ app.post("/export", async (req, res) => {
   try {
     const files = [];
 
-    // Download videos
+    // download each video
     for (let i = 0; i < videoUrls.length; i++) {
       const filePath = path.join(workDir, `clip${i}.mp4`);
       const response = await fetch(videoUrls[i]);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch video ${i}`);
+      }
+
       const buffer = await response.buffer();
       fs.writeFileSync(filePath, buffer);
       files.push(filePath);
     }
 
-    // Create FFmpeg concat file
+    // create ffmpeg concat file
     const listFile = path.join(workDir, "list.txt");
     fs.writeFileSync(
       listFile,
@@ -41,7 +50,7 @@ app.post("/export", async (req, res) => {
 
     const outputFile = path.join(workDir, "output.mp4");
 
-    // Run FFmpeg
+    // run ffmpeg
     exec(
       `ffmpeg -y -f concat -safe 0 -i ${listFile} -c copy ${outputFile}`,
       (err) => {
@@ -50,18 +59,17 @@ app.post("/export", async (req, res) => {
           return res.status(500).json({ error: "FFmpeg failed" });
         }
 
-        // Send the final video back
+        // send final video
         res.download(outputFile, "memory-maker.mp4");
       }
     );
-
   } catch (err) {
     console.error("Exporter error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ✅ Render-compatible port handling
+// Render-compatible port
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
