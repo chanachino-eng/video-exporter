@@ -1,13 +1,12 @@
 const express = require("express");
 const fetch = require("node-fetch");
-const { exec } = require("child_process");
+const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuid } = require("uuid");
 const cors = require("cors");
 
 const app = express();
-
 app.use(express.json());
 app.use(cors());
 
@@ -23,58 +22,55 @@ app.post("/export", async (req, res) => {
   fs.mkdirSync(workDir, { recursive: true });
 
   try {
-    const inputFiles = [];
+    const normalizedFiles = [];
 
+    // 1️⃣ Download + normalize each clip
     for (let i = 0; i < videoUrls.length; i++) {
-      const filePath = path.join(workDir, `clip${i}.mp4`);
+      const rawFile = path.join(workDir, `raw${i}.mp4`);
+      const normFile = path.join(workDir, `norm${i}.mp4`);
+
       const response = await fetch(videoUrls[i]);
+      if (!response.ok) throw new Error(`Failed to fetch video ${i}`);
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch video ${i}`);
-      }
+      fs.writeFileSync(rawFile, await response.buffer());
 
-      const buffer = await response.buffer();
-      fs.writeFileSync(filePath, buffer);
-      inputFiles.push(filePath);
+      // Normalize clip (THIS IS THE KEY)
+      execSync(
+        `ffmpeg -y -i ${rawFile} \
+        -vf "scale=1280:-2:force_original_aspect_ratio=decrease,format=yuv420p" \
+        -r 30 \
+        -c:v libx264 \
+        -profile:v baseline \
+        -level 3.0 \
+        -c:a aac \
+        -ac 2 \
+        ${normFile}`,
+        { stdio: "ignore" }
+      );
+
+      normalizedFiles.push(normFile);
     }
 
-    const outputFile = path.join(workDir, "output.mp4");
-
-    // VERY SIMPLE concat attempt (diagnostic)
+    // 2️⃣ Create concat list
     const listFile = path.join(workDir, "list.txt");
     fs.writeFileSync(
       listFile,
-      inputFiles.map(f => `file '${f}'`).join("\n")
+      normalizedFiles.map(f => `file '${f}'`).join("\n")
     );
 
-    const cmd = `
-      ffmpeg -y
-      -loglevel error
-      -f concat -safe 0
-      -i ${listFile}
-      -pix_fmt yuv420p
-      -c:v libx264
-      -c:a aac
-      ${outputFile}
-    `.replace(/\s+/g, " ");
+    const outputFile = path.join(workDir, "output.mp4");
 
-    exec(cmd, (err, stdout, stderr) => {
-      console.error("FFmpeg STDOUT:", stdout);
-      console.error("FFmpeg STDERR:", stderr);
+    // 3️⃣ Concatenate normalized clips
+    execSync(
+      `ffmpeg -y -f concat -safe 0 -i ${listFile} -c copy ${outputFile}`,
+      { stdio: "ignore" }
+    );
 
-      if (err) {
-        return res.status(500).json({
-          error: "FFmpeg failed",
-          details: stderr || err.message
-        });
-      }
-
-      res.download(outputFile, "memory-maker.mp4");
-    });
+    res.download(outputFile, "memory-maker.mp4");
 
   } catch (err) {
-    console.error("Exporter error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("Export failed:", err);
+    res.status(500).json({ error: "FFmpeg failed" });
   }
 });
 
