@@ -8,7 +8,7 @@ const cors = require("cors");
 
 const app = express();
 
-// middleware
+// Middleware
 app.use(express.json());
 app.use(cors());
 
@@ -27,7 +27,7 @@ app.post("/export", async (req, res) => {
   try {
     const files = [];
 
-    // download each video
+    // Download videos
     for (let i = 0; i < videoUrls.length; i++) {
       const filePath = path.join(workDir, `clip${i}.mp4`);
       const response = await fetch(videoUrls[i]);
@@ -41,7 +41,7 @@ app.post("/export", async (req, res) => {
       files.push(filePath);
     }
 
-    // create ffmpeg concat file
+    // Create FFmpeg concat file
     const listFile = path.join(workDir, "list.txt");
     fs.writeFileSync(
       listFile,
@@ -50,19 +50,20 @@ app.post("/export", async (req, res) => {
 
     const outputFile = path.join(workDir, "output.mp4");
 
-    // run ffmpeg
+    // Run FFmpeg (RE-ENCODE for compatibility)
     exec(
-      `ffmpeg -y -f concat -safe 0 -i ${listFile} -c copy ${outputFile}`,
+      `ffmpeg -y -f concat -safe 0 -i ${listFile} -vf format=yuv420p -c:v libx264 -c:a aac ${outputFile}`,
       (err) => {
         if (err) {
           console.error("FFmpeg error:", err);
           return res.status(500).json({ error: "FFmpeg failed" });
         }
 
-        // send final video
+        // Send final video
         res.download(outputFile, "memory-maker.mp4");
       }
     );
+
   } catch (err) {
     console.error("Exporter error:", err);
     res.status(500).json({ error: err.message });
