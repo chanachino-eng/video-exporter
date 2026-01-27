@@ -21,11 +21,10 @@ app.post("/export", async (req, res) => {
 
   const jobId = uuid();
   const workDir = `/tmp/${jobId}`;
-
   fs.mkdirSync(workDir, { recursive: true });
 
   try {
-    const files = [];
+    const inputFiles = [];
 
     // Download videos
     for (let i = 0; i < videoUrls.length; i++) {
@@ -38,31 +37,37 @@ app.post("/export", async (req, res) => {
 
       const buffer = await response.buffer();
       fs.writeFileSync(filePath, buffer);
-      files.push(filePath);
+      inputFiles.push(filePath);
     }
-
-    // Create FFmpeg concat file
-    const listFile = path.join(workDir, "list.txt");
-    fs.writeFileSync(
-      listFile,
-      files.map(f => `file '${f}'`).join("\n")
-    );
 
     const outputFile = path.join(workDir, "output.mp4");
 
-    // Run FFmpeg (RE-ENCODE for compatibility)
-    exec(
-      `ffmpeg -y -f concat -safe 0 -i ${listFile} -vf format=yuv420p -c:v libx264 -c:a aac ${outputFile}`,
-      (err) => {
-        if (err) {
-          console.error("FFmpeg error:", err);
-          return res.status(500).json({ error: "FFmpeg failed" });
-        }
+    // Build FFmpeg input arguments
+    const inputArgs = inputFiles.map(f => `-i ${f}`).join(" ");
 
-        // Send final video
-        res.download(outputFile, "memory-maker.mp4");
+    // Build concat filter
+    const filter = `concat=n=${inputFiles.length}:v=1:a=1`;
+
+    // Run FFmpeg using filter_complex (CORRECT METHOD)
+    const cmd = `
+      ffmpeg -y ${inputArgs}
+      -filter_complex "${filter}"
+      -vsync 2
+      -movflags +faststart
+      -pix_fmt yuv420p
+      -c:v libx264
+      -c:a aac
+      ${outputFile}
+    `.replace(/\s+/g, " ");
+
+    exec(cmd, (err) => {
+      if (err) {
+        console.error("FFmpeg error:", err);
+        return res.status(500).json({ error: "FFmpeg failed" });
       }
-    );
+
+      res.download(outputFile, "memory-maker.mp4");
+    });
 
   } catch (err) {
     console.error("Exporter error:", err);
