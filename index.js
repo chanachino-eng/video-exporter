@@ -42,17 +42,24 @@ app.post("/export", async (req, res) => {
 
     const outputFile = path.join(workDir, "output.mp4");
 
-    // Build FFmpeg input arguments
+    // Build input arguments
     const inputArgs = inputFiles.map(f => `-i ${f}`).join(" ");
 
-    // Build concat filter
-    const filter = `concat=n=${inputFiles.length}:v=1:a=1`;
+    // Build filter_complex with explicit stream mapping
+    const videoStreams = inputFiles.map((_, i) => `[${i}:v:0]`).join("");
+    const audioStreams = inputFiles.map((_, i) => `[${i}:a:0]`).join("");
 
-    // Run FFmpeg using filter_complex (CORRECT METHOD)
+    const filter = `
+      ${videoStreams}${audioStreams}
+      concat=n=${inputFiles.length}:v=1:a=1
+    `.replace(/\s+/g, "");
+
     const cmd = `
-      ffmpeg -y ${inputArgs}
+      ffmpeg -y
+      ${inputArgs}
       -filter_complex "${filter}"
-      -vsync 2
+      -map "[v]"
+      -map "[a]"
       -movflags +faststart
       -pix_fmt yuv420p
       -c:v libx264
@@ -60,9 +67,9 @@ app.post("/export", async (req, res) => {
       ${outputFile}
     `.replace(/\s+/g, " ");
 
-    exec(cmd, (err) => {
+    exec(cmd, (err, stdout, stderr) => {
       if (err) {
-        console.error("FFmpeg error:", err);
+        console.error("FFmpeg stderr:", stderr);
         return res.status(500).json({ error: "FFmpeg failed" });
       }
 
