@@ -8,7 +8,6 @@ const cors = require("cors");
 
 const app = express();
 
-// Middleware
 app.use(express.json());
 app.use(cors());
 
@@ -26,7 +25,6 @@ app.post("/export", async (req, res) => {
   try {
     const inputFiles = [];
 
-    // Download videos
     for (let i = 0; i < videoUrls.length; i++) {
       const filePath = path.join(workDir, `clip${i}.mp4`);
       const response = await fetch(videoUrls[i]);
@@ -42,25 +40,18 @@ app.post("/export", async (req, res) => {
 
     const outputFile = path.join(workDir, "output.mp4");
 
-    // Build input arguments
-    const inputArgs = inputFiles.map(f => `-i ${f}`).join(" ");
-
-    // Build filter_complex with explicit stream mapping
-    const videoStreams = inputFiles.map((_, i) => `[${i}:v:0]`).join("");
-    const audioStreams = inputFiles.map((_, i) => `[${i}:a:0]`).join("");
-
-    const filter = `
-      ${videoStreams}${audioStreams}
-      concat=n=${inputFiles.length}:v=1:a=1
-    `.replace(/\s+/g, "");
+    // VERY SIMPLE concat attempt (diagnostic)
+    const listFile = path.join(workDir, "list.txt");
+    fs.writeFileSync(
+      listFile,
+      inputFiles.map(f => `file '${f}'`).join("\n")
+    );
 
     const cmd = `
       ffmpeg -y
-      ${inputArgs}
-      -filter_complex "${filter}"
-      -map "[v]"
-      -map "[a]"
-      -movflags +faststart
+      -loglevel error
+      -f concat -safe 0
+      -i ${listFile}
       -pix_fmt yuv420p
       -c:v libx264
       -c:a aac
@@ -68,9 +59,14 @@ app.post("/export", async (req, res) => {
     `.replace(/\s+/g, " ");
 
     exec(cmd, (err, stdout, stderr) => {
+      console.error("FFmpeg STDOUT:", stdout);
+      console.error("FFmpeg STDERR:", stderr);
+
       if (err) {
-        console.error("FFmpeg stderr:", stderr);
-        return res.status(500).json({ error: "FFmpeg failed" });
+        return res.status(500).json({
+          error: "FFmpeg failed",
+          details: stderr || err.message
+        });
       }
 
       res.download(outputFile, "memory-maker.mp4");
@@ -82,9 +78,7 @@ app.post("/export", async (req, res) => {
   }
 });
 
-// Render-compatible port
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
   console.log(`Video exporter running on port ${PORT}`);
 });
