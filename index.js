@@ -26,7 +26,7 @@ app.post("/export", async (req, res) => {
 
     // 1️⃣ Download + normalize each clip
     for (let i = 0; i < videoUrls.length; i++) {
-      const rawFile = path.join(workDir, `raw${i}.mp4`);
+      const rawFile = path.join(workDir, `raw${i}.mov`);
       const normFile = path.join(workDir, `norm${i}.mp4`);
 
       const response = await fetch(videoUrls[i]);
@@ -34,14 +34,17 @@ app.post("/export", async (req, res) => {
 
       fs.writeFileSync(rawFile, await response.buffer());
 
-      // Normalize clip (THIS IS THE KEY)
+      // 🔑 iPhone-safe normalization
       execSync(
-        `ffmpeg -y -i ${rawFile} \
+        `ffmpeg -y -ignore_editlist 1 -i ${rawFile} \
         -vf "scale=1280:-2:force_original_aspect_ratio=decrease,format=yuv420p" \
         -r 30 \
+        -map 0:v:0 \
+        -map 0:a? \
         -c:v libx264 \
         -profile:v baseline \
         -level 3.0 \
+        -pix_fmt yuv420p \
         -c:a aac \
         -ac 2 \
         ${normFile}`,
